@@ -1690,6 +1690,159 @@ able to operate on mutable references <em>and</em> satisfy Rust's rules of non-a
 mutable references, you have to extract the PyO3 reference wrappers <a href="https://docs.rs/pyo3/latest/pyo3/pycell/struct.PyRef.html"><code>PyRef</code></a>
 and <a href="https://docs.rs/pyo3/latest/pyo3/pycell/struct.PyRefMut.html"><code>PyRefMut</code></a>.  They work like the reference wrappers of
 <code>std::cell::RefCell</code> and ensure (at runtime) that Rust borrows are allowed.</p>
+<h4><a class="header" href="#deriving-a-hrefhttpsdocsrspyo3latestpyo3conversiontraitfrompyobjecthtmlfrompyobjecta" id="deriving-a-hrefhttpsdocsrspyo3latestpyo3conversiontraitfrompyobjecthtmlfrompyobjecta">Deriving <a href="https://docs.rs/pyo3/latest/pyo3/conversion/trait.FromPyObject.html"><code>FromPyObject</code></a></a></h4>
+<p><a href="https://docs.rs/pyo3/latest/pyo3/conversion/trait.FromPyObject.html"><code>FromPyObject</code></a> can be automatically derived for many kinds of structs and enums
+if the member types themselves implement <code>FromPyObject</code>. This even includes members
+with a generic type <code>T: FromPyObject</code>. Derivation for empty enums, enum variants and
+structs is not supported.</p>
+<h4><a class="header" href="#deriving-a-hrefhttpsdocsrspyo3latestpyo3conversiontraitfrompyobjecthtmlfrompyobjecta-for-structs" id="deriving-a-hrefhttpsdocsrspyo3latestpyo3conversiontraitfrompyobjecthtmlfrompyobjecta-for-structs">Deriving <a href="https://docs.rs/pyo3/latest/pyo3/conversion/trait.FromPyObject.html"><code>FromPyObject</code></a> for structs</a></h4>
+<pre><code>use pyo3::prelude::*;
+
+#[derive(FromPyObject)]
+struct RustyStruct {
+    my_string: String,
+}
+</code></pre>
+<p>The derivation generates code that will per default access the attribute <code>my_string</code> on
+the Python object, i.e. <code>obj.getattr(&quot;my_string&quot;)</code>, and call <code>extract()</code> on the attribute.
+It is also possible to access the value on the Python object through <code>obj.get_item(&quot;my_string&quot;)</code>
+by setting the attribute <code>pyo3(item)</code> on the field:</p>
+<pre><code>use pyo3::prelude::*;
+
+#[derive(FromPyObject)]
+struct RustyStruct {
+    #[pyo3(item)]
+    my_string: String,
+}
+</code></pre>
+<p>The argument passed to <code>getattr</code> and <code>get_item</code> can also be configured:</p>
+<pre><code>use pyo3::prelude::*;
+
+#[derive(FromPyObject)]
+struct RustyStruct {
+    #[pyo3(item(&quot;key&quot;))]
+    string_in_mapping: String,
+    #[pyo3(attribute(&quot;name&quot;))]
+    string_attr: String,
+}
+</code></pre>
+<p>This tries to extract <code>string_attr</code> from the attribute <code>name</code> and <code>string_in_mapping</code>
+from a mapping with the key <code>&quot;key&quot;</code>. The arguments for <code>attribute</code> are restricted to
+non-empty string literals while <code>item</code> can take any valid literal that implements
+<code>ToBorrowedObject</code>.</p>
+<h4><a class="header" href="#deriving-a-hrefhttpsdocsrspyo3latestpyo3conversiontraitfrompyobjecthtmlfrompyobjecta-for-tuple-structs" id="deriving-a-hrefhttpsdocsrspyo3latestpyo3conversiontraitfrompyobjecthtmlfrompyobjecta-for-tuple-structs">Deriving <a href="https://docs.rs/pyo3/latest/pyo3/conversion/trait.FromPyObject.html"><code>FromPyObject</code></a> for tuple structs</a></h4>
+<p>Tuple structs are also supported but do not allow customizing the extraction. The input is
+always assumed to be a Python tuple with the same length as the Rust type, the <code>n</code>th field
+is extracted from the <code>n</code>th item in the Python tuple.</p>
+<pre><code>use pyo3::prelude::*;
+
+#[derive(FromPyObject)]
+struct RustyTuple(String, String);
+</code></pre>
+<p>Tuple structs with a single field are treated as wrapper types which are described in the
+following section. To override this behaviour and ensure that the input is in fact a tuple,
+specify the struct as </p>
+<pre><code>use pyo3::prelude::*;
+
+#[derive(FromPyObject)]
+struct RustyTuple((String,));
+</code></pre>
+<h4><a class="header" href="#deriving-a-hrefhttpsdocsrspyo3latestpyo3conversiontraitfrompyobjecthtmlfrompyobjecta-for-wrapper-types" id="deriving-a-hrefhttpsdocsrspyo3latestpyo3conversiontraitfrompyobjecthtmlfrompyobjecta-for-wrapper-types">Deriving <a href="https://docs.rs/pyo3/latest/pyo3/conversion/trait.FromPyObject.html"><code>FromPyObject</code></a> for wrapper types</a></h4>
+<p>The <code>pyo3(transparent)</code> attribute can be used on structs with exactly one field. This results
+in extracting directly from the input object, i.e. <code>obj.extract()</code>, rather than trying to access
+an item or attribute. This behaviour is enabled per default for newtype structs and tuple-variants
+with a single field.</p>
+<pre><code>use pyo3::prelude::*;
+
+#[derive(FromPyObject)]
+struct RustyTransparentTupleStruct(String);
+
+#[derive(FromPyObject)]
+#[pyo3(transparent)]
+struct RustyTransparentStruct {
+    inner: String,
+}
+</code></pre>
+<h4><a class="header" href="#deriving-a-hrefhttpsdocsrspyo3latestpyo3conversiontraitfrompyobjecthtmlfrompyobjecta-for-enums" id="deriving-a-hrefhttpsdocsrspyo3latestpyo3conversiontraitfrompyobjecthtmlfrompyobjecta-for-enums">Deriving <a href="https://docs.rs/pyo3/latest/pyo3/conversion/trait.FromPyObject.html"><code>FromPyObject</code></a> for enums</a></h4>
+<p>The <code>FromPyObject</code> derivation for enums generates code that tries to extract the variants in the
+order of the fields. As soon as a variant can be extracted succesfully, that variant is returned.</p>
+<p>The same customizations and restrictions described for struct derivations apply to enum variants,
+i.e. a tuple variant assumes that the input is a Python tuple, and a struct variant defaults to
+extracting fields as attributes but can be configured in the same manner. The <code>transparent</code>
+attribute can be applied to single-field-variants.</p>
+<pre><code>use pyo3::prelude::*;
+
+#[derive(FromPyObject)]
+enum RustyEnum&lt;'a&gt; {
+    Int(usize), // input is a positive int
+    String(String), // input is a string
+    IntTuple(usize, usize), // input is a 2-tuple with positive ints
+    StringIntTuple(String, usize), // input is a 2-tuple with String and int
+    Coordinates3d { // needs to be in front of 2d
+        x: usize,
+        y: usize,
+        z: usize,
+    },
+    Coordinates2d { // only gets checked if the input did not have `z`
+        #[pyo3(attribute(&quot;x&quot;))]
+        a: usize,
+        #[pyo3(attribute(&quot;y&quot;))]
+        b: usize,
+    },
+    #[pyo3(transparent)]
+    CatchAll(&amp;'a PyAny), // This extraction never fails
+}
+</code></pre>
+<p>If none of the enum variants match, a <code>PyValueError</code> containing the names of the
+tested variants is returned. The names reported in the error message can be customized
+through the <code>pyo3(annotation = &quot;name&quot;)</code> attribute, e.g. to use conventional Python type
+names:</p>
+<pre><code>use pyo3::prelude::*;
+
+#[derive(FromPyObject)]
+enum RustyEnum {
+    #[pyo3(transparent, annotation = &quot;str&quot;)]
+    String(String),
+    #[pyo3(transparent, annotation = &quot;int&quot;)]
+    Int(isize),
+}
+</code></pre>
+<p>If the input is neither a string nor an integer, the error message will be:
+<code>&quot;Can't convert &lt;INPUT&gt; to Union[str, int]&quot;</code>, where <code>&lt;INPUT&gt;</code> is replaced by the type name and
+<code>repr()</code> of the input object. </p>
+<h4><a class="header" href="#derivefrompyobject-container-attributes" id="derivefrompyobject-container-attributes"><code>#[derive(FromPyObject)]</code> Container Attributes</a></h4>
+<ul>
+<li><code>pyo3(transparent)</code>
+<ul>
+<li>extract the field directly from the object as <code>obj.extract()</code> instead of <code>get_item()</code> or
+<code>getattr()</code></li>
+<li>Newtype structs and tuple-variants are treated as transparent per default.</li>
+<li>only supported for single-field structs and enum variants</li>
+</ul>
+</li>
+<li><code>pyo3(annotation = &quot;name&quot;)</code>
+<ul>
+<li>changes the name of the failed variant in the generated error message in case of failure.</li>
+<li>e.g. <code>pyo3(&quot;int&quot;)</code> reports the variant's type as <code>int</code>.</li>
+<li>only supported for enum variants</li>
+</ul>
+</li>
+</ul>
+<h4><a class="header" href="#derivefrompyobject-field-attributes" id="derivefrompyobject-field-attributes"><code>#[derive(FromPyObject)]</code> Field Attributes</a></h4>
+<ul>
+<li><code>pyo3(attribute)</code>, <code>pyo3(attribute(&quot;name&quot;))</code>
+<ul>
+<li>retrieve the field from an attribute, possibly with a custom name specified as an argument</li>
+<li>argument must be a string-literal.</li>
+</ul>
+</li>
+<li><code>pyo3(item)</code>, <code>pyo3(item(&quot;key&quot;))</code>
+<ul>
+<li>retrieve the field from a mapping, possibly with the custom key specified as an argument.</li>
+<li>can be any literal that implements <code>ToBorrowedObject</code></li>
+</ul>
+</li>
+</ul>
 <h3><a class="header" href="#intopyt" id="intopyt"><code>IntoPy&lt;T&gt;</code></a></h3>
 <p>This trait defines the to-python conversion for a Rust type. It is usually implemented as
 <code>IntoPy&lt;PyObject&gt;</code>, which is the trait needed for returning a value from <code>#[pyfunction]</code> and
