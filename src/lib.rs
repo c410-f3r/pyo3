@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "const-generics", feature(min_const_generics))]
+#![cfg_attr(feature = "nightly", allow(incomplete_features))]
 #![cfg_attr(feature = "nightly", feature(specialization))]
 #![allow(clippy::missing_safety_doc)] // FIXME (#698)
 
