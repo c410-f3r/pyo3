@@ -246,3 +246,37 @@ mod slice;
 mod string;
 mod tuple;
 mod typeobject;
+
+struct ArrayGuard<T, const N: usize> {
+    dst: *mut T,
+    initialized: usize,
+}
+
+impl<T, const N: usize> Drop for ArrayGuard<T, N> {
+    fn drop(&mut self) {
+        debug_assert!(self.initialized <= N);
+        let initialized_part = core::ptr::slice_from_raw_parts_mut(self.dst, self.initialized);
+        unsafe {
+            core::ptr::drop_in_place(initialized_part);
+        }
+    }
+}
+
+fn try_create_array<E, F, T, const N: usize>(mut cb: F) -> Result<[T; N], E>
+where
+    F: FnMut(usize) -> Result<T, E>,
+{
+    let mut array: core::mem::MaybeUninit<[T; N]> = core::mem::MaybeUninit::uninit();
+    let mut guard: ArrayGuard<T, N> = ArrayGuard {
+        dst: array.as_mut_ptr() as _,
+        initialized: 0,
+    };
+    unsafe {
+        for (idx, value_ptr) in (&mut *array.as_mut_ptr()).iter_mut().enumerate() {
+            core::ptr::write(value_ptr, cb(idx)?);
+            guard.initialized += 1;
+        }
+        core::mem::forget(guard);
+        Ok(array.assume_init())
+    }
+}

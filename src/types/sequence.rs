@@ -257,56 +257,38 @@ impl PySequence {
     }
 }
 
-macro_rules! array_impls {
-    ($($N:expr),+) => {
-        $(
-            impl<'a, T> FromPyObject<'a> for [T; $N]
-            where
-                T: Copy + Default + FromPyObject<'a>,
-            {
-                #[cfg(not(feature = "nightly"))]
-                fn extract(obj: &'a PyAny) -> PyResult<Self> {
-                    let mut array = [T::default(); $N];
-                    extract_sequence_into_slice(obj, &mut array)?;
-                    Ok(array)
-                }
+impl<'a, T, const N: usize> FromPyObject<'a> for [T; N]
+where
+    T: FromPyObject<'a>,
+{
+    #[cfg(not(feature = "nightly"))]
+    fn extract(obj: &'a PyAny) -> PyResult<Self> {
+        create_array_from_obj(obj)
+    }
 
-                #[cfg(feature = "nightly")]
-                default fn extract(obj: &'a PyAny) -> PyResult<Self> {
-                    let mut array = [T::default(); $N];
-                    extract_sequence_into_slice(obj, &mut array)?;
-                    Ok(array)
-                }
-            }
-
-            #[cfg(feature = "nightly")]
-            impl<'source, T> FromPyObject<'source> for [T; $N]
-            where
-                for<'a> T: Default + FromPyObject<'a> + crate::buffer::Element,
-            {
-                fn extract(obj: &'source PyAny) -> PyResult<Self> {
-                    let mut array = [T::default(); $N];
-                    // first try buffer protocol
-                    if let Ok(buf) = crate::buffer::PyBuffer::get(obj) {
-                        if buf.dimensions() == 1 && buf.copy_to_slice(obj.py(), &mut array).is_ok() {
-                            buf.release(obj.py());
-                            return Ok(array);
-                        }
-                        buf.release(obj.py());
-                    }
-                    // fall back to sequence protocol
-                    extract_sequence_into_slice(obj, &mut array)?;
-                    Ok(array)
-                }
-            }
-        )+
+    #[cfg(feature = "nightly")]
+    default fn extract(obj: &'a PyAny) -> PyResult<Self> {
+        create_array_from_obj(obj)
     }
 }
 
-array_impls!(
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32
-);
+#[cfg(feature = "nightly")]
+impl<'source, T, const N: usize> FromPyObject<'source> for [T; N]
+where
+    for<'a> T: FromPyObject<'a> + crate::buffer::Element,
+{
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        let mut array = create_array_from_obj(obj)?;
+        if let Ok(buf) = crate::buffer::PyBuffer::get(obj) {
+            if buf.dimensions() == 1 && buf.copy_to_slice(obj.py(), &mut array).is_ok() {
+                buf.release(obj.py());
+                return Ok(array);
+            }
+            buf.release(obj.py());
+        }
+        Ok(array)
+    }
+}
 
 impl<'a, T> FromPyObject<'a> for Vec<T>
 where
@@ -343,6 +325,20 @@ where
     }
 }
 
+fn create_array_from_obj<'s, T, const N: usize>(obj: &'s PyAny) -> PyResult<[T; N]>
+where
+    T: FromPyObject<'s>,
+{
+    let seq = <PySequence as PyTryFrom>::try_from(obj)?;
+    crate::types::try_create_array(|idx| {
+        seq.get_item(idx as isize)
+            .map_err(|_| {
+                exceptions::PyBufferError::new_err("Slice length does not match buffer length.")
+            })?
+            .extract::<T>()
+    })
+}
+
 fn extract_sequence<'s, T>(obj: &'s PyAny) -> PyResult<Vec<T>>
 where
     T: FromPyObject<'s>,
@@ -353,22 +349,6 @@ where
         v.push(item?.extract::<T>()?);
     }
     Ok(v)
-}
-
-fn extract_sequence_into_slice<'s, T>(obj: &'s PyAny, slice: &mut [T]) -> PyResult<()>
-where
-    T: FromPyObject<'s>,
-{
-    let seq = <PySequence as PyTryFrom>::try_from(obj)?;
-    if seq.len()? as usize != slice.len() {
-        return Err(exceptions::PyBufferError::new_err(
-            "Slice length does not match buffer length.",
-        ));
-    }
-    for (value, item) in slice.iter_mut().zip(seq.iter()?) {
-        *value = item?.extract::<T>()?;
-    }
-    Ok(())
 }
 
 impl<'v> PyTryFrom<'v> for PySequence {
